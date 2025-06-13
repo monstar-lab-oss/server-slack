@@ -381,16 +381,58 @@ class SlackClient {
 }
 
 async function main() {
+  console.error("Initializing Slack MCP Server...");
+  console.error("Checking environment variables...");
+  
   const botToken = process.env.SLACK_BOT_TOKEN;
   const teamId = process.env.SLACK_TEAM_ID;
 
   if (!botToken || !teamId) {
+    console.error("ERROR: Missing required environment variables");
+    console.error(`SLACK_BOT_TOKEN: ${botToken ? '[SET]' : '[NOT SET]'}`);
+    console.error(`SLACK_TEAM_ID: ${teamId ? '[SET]' : '[NOT SET]'}`);
     console.error(
       "Please set SLACK_BOT_TOKEN and SLACK_TEAM_ID environment variables",
     );
-    process.exit(1);
+    
+    // Instead of exiting immediately, create a server that returns error messages
+    const errorServer = new Server(
+      {
+        name: "Slack MCP Server (Not Configured)",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      },
+    );
+    
+    errorServer.setRequestHandler(ListToolsRequestSchema, async () => {
+      console.error("ListToolsRequest received but server not configured");
+      return { tools: [] };
+    });
+    
+    errorServer.setRequestHandler(CallToolRequestSchema, async () => {
+      console.error("CallToolRequest received but server not configured");
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            error: "Slack server not configured. Please set SLACK_BOT_TOKEN and SLACK_TEAM_ID environment variables."
+          })
+        }],
+      };
+    });
+    
+    const transport = new StdioServerTransport();
+    console.error("Connecting error server to transport...");
+    await errorServer.connect(transport);
+    console.error("Slack MCP Server running in error mode - missing environment variables");
+    return;
   }
 
+  console.error("Environment variables verified");
   console.error("Starting Slack MCP Server...");
   const server = new Server(
     {
@@ -404,12 +446,15 @@ async function main() {
     },
   );
 
+  console.error("Creating SlackClient instance...");
   const slackClient = new SlackClient(botToken);
+  console.error("SlackClient instance created");
 
+  console.error("Setting up request handlers...");
   server.setRequestHandler(
     CallToolRequestSchema,
     async (request: CallToolRequest) => {
-      console.error("Received CallToolRequest:", request);
+      console.error("Received CallToolRequest:", JSON.stringify(request, null, 2));
       try {
         if (!request.params.arguments) {
           throw new Error("No arguments provided");
@@ -569,11 +614,24 @@ async function main() {
     };
   });
 
+  console.error("Request handlers configured");
+  
   const transport = new StdioServerTransport();
-  console.error("Connecting server to transport...");
-  await server.connect(transport);
-
-  console.error("Slack MCP Server running on stdio");
+  console.error("Creating StdioServerTransport...");
+  
+  try {
+    console.error("Connecting server to transport...");
+    await server.connect(transport);
+    console.error("Server connected successfully");
+    console.error("Slack MCP Server is now running on stdio");
+    
+    // Keep the process alive
+    process.stdin.resume();
+    
+  } catch (error) {
+    console.error("Failed to connect server:", error);
+    throw error;
+  }
 }
 
 main().catch((error) => {
